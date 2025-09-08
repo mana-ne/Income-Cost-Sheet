@@ -20,7 +20,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // ==== Supabase config (use your own values) ====
+    // ==== Supabase config ====
     const SUPABASE_URL = "https://wphylenqbjyskbpbbuax.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndwaHlsZW5xYmp5c2ticGJidWF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczNTQyNDMsImV4cCI6MjA3MjkzMDI0M30.qN68IhysCYgOYG4ZW3fYvAWbSTJihfttnRgrE2DHRyY";
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -83,11 +83,10 @@
       const [income, setIncome] = useState([]);
       const [costs, setCosts] = useState([]);
       const [fixedCosts, setFixedCosts] = useState([]);
-      const [fixedApplied, setFixedApplied] = useState(false);
+      const [fixedApplied, setFixedApplied] = useState(false); // kept for now, not used for disabling
 
       const [modal, setModal] = useState({ isOpen: false, type: null, title: '', message: '' });
 
-      // Helper: get current user id from session
       const getUserId = async () => {
         const { data: { session } } = await supabase.auth.getSession();
         return session?.user?.id || null;
@@ -95,56 +94,50 @@
 
       // Auth state
       useEffect(() => {
-        const init = async () => {
+        (async () => {
           const { data: { session } } = await supabase.auth.getSession();
           setSession(session);
-        };
-        init();
+        })();
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
         return () => subscription.unsubscribe();
       }, []);
 
       // After login, fetch months list
-      useEffect(() => {
-        if (!session) return;
-        loadMonths();
-      }, [session]);
+      useEffect(() => { if (session) loadMonths(); }, [session]);
 
       // Fetch fixed costs once logged in
       useEffect(() => {
         if (!session) return;
-        const fetchFixed = async () => {
-          const { data, error } = await supabase
+        (async () => {
+          const { data } = await supabase
             .from('fixed_costs')
             .select('*')
             .order('created_at', { ascending: true });
-          if (!error) setFixedCosts(data || []);
-        };
-        fetchFixed();
+          setFixedCosts(data || []);
+        })();
       }, [session]);
 
       // Fetch entries for selected month
       useEffect(() => {
         if (!session) return;
-        const fetchMonth = async () => {
-          const { data, error } = await supabase
+        (async () => {
+          const { data } = await supabase
             .from('entries')
             .select('*')
             .eq('month', selectedMonth)
             .order('created_at', { ascending: true });
-          if (error) return;
           const inc = (data || []).filter(r => r.type === 'income');
           const cos = (data || []).filter(r => r.type === 'cost');
           setIncome(inc);
           setCosts(cos);
+
           const { data: flags } = await supabase
             .from('month_flags')
             .select('*')
             .eq('month', selectedMonth)
             .maybeSingle();
           setFixedApplied(!!flags?.fixed_costs_applied);
-        };
-        fetchMonth();
+        })();
       }, [session, selectedMonth]);
 
       // Totals
@@ -164,17 +157,27 @@
 
       const addEntry = async (type, { description, amount }) => {
         if (!description || !amount) return;
-        const user_id = await getUserId();
+
+        const { data: u } = await supabase.auth.getUser();
+        const user_id = u?.user?.id;
         if (!user_id) { alert('Please sign in again'); return; }
 
-        const payload = { id: uuid(), user_id, month: selectedMonth, type, description, amount: Number(amount) };
+        const payload = {
+          id: uuid(),
+          user_id,
+          month: selectedMonth,
+          type,
+          description,
+          amount: Number(amount),
+          is_fixed: false
+        };
+
         const { data, error } = await supabase.from('entries').insert(payload).select().single();
-        if (error) {
-          console.error('Entry insert error:', error);
-          alert('Error adding: ' + (error.message || 'unknown'));
-          return;
-        }
-        if (type === 'income') setIncome(prev => [...prev, data]); else setCosts(prev => [...prev, data]);
+        if (error) { alert('Error adding: ' + (error.message || 'unknown')); return; }
+
+        if (type === 'income') setIncome(prev => [...prev, data]);
+        else setCosts(prev => [...prev, data]);
+
         await loadMonths();
       };
 
@@ -194,10 +197,8 @@
 
       const addFixedCost = async ({ description, amount }) => {
         if (!description || !amount) return;
-
         const user_id = await getUserId();
         if (!user_id) { alert('Please sign in again'); return; }
-
         const payload = { id: uuid(), user_id, description, amount: Number(amount) };
         const { data, error } = await supabase.from('fixed_costs').insert(payload).select().single();
         if (error) {
@@ -214,55 +215,71 @@
         setFixedCosts(prev => prev.filter(f => f.id !== id));
       };
 
+      // Always enabled: refreshes fixed costs for the selected month
       const applyFixedCosts = async () => {
-        if (fixedApplied) {
-          setModal({ isOpen:true, type:'alert', title:'Notice', message:'Fixed costs already applied to this month.' });
+        if (fixedCosts.length === 0) {
+          alert('No fixed costs defined yet');
           return;
         }
-        if (fixedCosts.length === 0) return;
 
-        const user_id = await getUserId();
+        const { data: u } = await supabase.auth.getUser();
+        const user_id = u?.user?.id;
         if (!user_id) { alert('Please sign in again'); return; }
 
+        // 1) Remove previously-applied fixed costs for this month
+        const { error: delErr } = await supabase
+          .from('entries')
+          .delete()
+          .eq('user_id', user_id)
+          .eq('month', selectedMonth)
+          .eq('is_fixed', true);
+        if (delErr) {
+          console.error('Delete old fixed rows error:', delErr);
+          alert('Could not refresh fixed costs');
+          return;
+        }
+
+        // 2) Insert fresh snapshot from fixed_costs
         const rows = fixedCosts.map(fc => ({
           id: uuid(),
           user_id,
           month: selectedMonth,
           type: 'cost',
           description: fc.description,
-          amount: Number(fc.amount)
+          amount: Number(fc.amount),
+          is_fixed: true
         }));
 
-        const { error } = await supabase.from('entries').insert(rows);
-        if (error) {
-          console.error('Apply fixed costs error:', error);
-          alert('Error applying fixed costs: ' + (error.message || 'unknown'));
-          return;
+        if (rows.length) {
+          const { error: insErr } = await supabase.from('entries').insert(rows);
+          if (insErr) {
+            console.error('Insert fixed rows error:', insErr);
+            alert('Could not apply fixed costs');
+            return;
+          }
         }
-        setCosts(prev => [...prev, ...rows]);
-        await supabase.from('month_flags').upsert({ month: selectedMonth, fixed_costs_applied: true });
-        setFixedApplied(true);
-        await loadMonths();
+
+        // 3) Update UI list for this month
+        setCosts(prev => {
+          const keep = prev.filter(c => !c.is_fixed);
+          return [...keep, ...rows];
+        });
       };
 
       const addMonth = async (name) => {
         const n = (name || '').trim();
         if (!n) return;
-
         const user_id = await getUserId();
         if (!user_id) { alert('Please sign in again'); return; }
-
         const { error } = await supabase
           .from('month_flags')
           .upsert({ month: n, user_id, fixed_costs_applied: false })
           .select();
-
         if (error) {
           console.error('Add month error:', error);
           alert('Could not add month: ' + (error.message || 'unknown'));
           return;
         }
-
         await loadMonths();
         setSelectedMonth(n);
       };
@@ -284,9 +301,11 @@
                 <h1 className="text-3xl sm:text-4xl font-bold text-slate-800">Income & Cost Sheet</h1>
                 <button onClick={signOut} className="p-2 px-4 bg-slate-200 rounded-lg">Sign out</button>
               </div>
-              <MonthNavigator months={months} selectedMonth={selectedMonth}
+              <MonthNavigator
+                months={months}
+                selectedMonth={selectedMonth}
                 onSelectMonth={setSelectedMonth}
-                onAddMonth={()=> setModal({ isOpen:true, type:'prompt', title:'Add New Month', message:'Enter the month and year (e.g., October 2025):' }) }
+                onAddMonth={()=> setModal({ isOpen:true, type:'prompt', title:'Add New Month', message:'Enter the month and year (e.g., October 2025):' })}
               />
             </header>
 
@@ -296,11 +315,12 @@
               <SummaryCard title="Net Balance" amount={netBalance} color={netBalance >= 0 ? 'text-blue-500' : 'text-orange-500'} />
             </div>
 
-            <FixedCostsManager fixedCosts={fixedCosts}
+            <FixedCostsManager
+              fixedCosts={fixedCosts}
               onAdd={addFixedCost}
               onDelete={deleteFixedCost}
               onApply={applyFixedCosts}
-              canApply={!fixedApplied}
+              canApply={true}  /* always enabled */
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
@@ -421,7 +441,7 @@
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="border-b border-slate-2 00">
+                  <tr className="border-b border-slate-200">
                     <th className="p-3 text-slate-600 font-semibold">Description</th>
                     <th className="p-3 text-slate-600 font-semibold text-right w-36">Amount</th>
                     <th className="p-3 text-center w-16"></th>
@@ -477,4 +497,3 @@
   </script>
 </body>
 </html>
-

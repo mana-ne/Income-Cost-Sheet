@@ -103,6 +103,13 @@
         return () => subscription.unsubscribe();
       }, []);
 
+        // After login, fetch the months list
+  useEffect(() => {
+    if (!session) return;
+    loadMonths();
+  }, [session]);
+
+
       // Fetch fixed costs once logged in
       useEffect(() => {
         if (!session) return;
@@ -197,12 +204,38 @@
         setFixedApplied(true);
       };
 
-      const addMonth = (name) => {
-        const n = (name||'').trim();
-        if (!n) return;
-        if (!months.includes(n)) setMonths(prev => [...prev, n]);
-        setSelectedMonth(n);
-      };
+const loadMonths = async () => {
+  const monthsSet = new Set([currentMonth]);
+
+  const { data: m1 } = await supabase.from('entries').select('month').order('month');
+  (m1 || []).forEach(r => monthsSet.add(r.month));
+
+  const { data: m2 } = await supabase.from('month_flags').select('month').order('month');
+  (m2 || []).forEach(r => monthsSet.add(r.month));
+
+  setMonths(Array.from(monthsSet));
+};
+
+    
+      const addMonth = async (name) => {
+  const n = (name || '').trim();
+  if (!n) return;
+
+  // Save the month into the database (month_flags table)
+  const { error } = await supabase
+    .from('month_flags')
+    .upsert({ month: n, fixed_costs_applied: false })
+    .select();
+
+  if (error) {
+    alert('Could not add month');
+    return;
+  }
+
+  await loadMonths();   // refresh dropdown from DB
+  setSelectedMonth(n);  // switch to that month
+};
+
 
       const signOut = async () => { await supabase.auth.signOut(); };
 
@@ -414,4 +447,5 @@
   </script>
 </body>
 </html>
+
 

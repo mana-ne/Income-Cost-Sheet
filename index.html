@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <title>Household Income & Cost Sheet (Shared)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Tailwind (CDN) -->
+  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React 18 (CDN) -->
+  <!-- React 18 -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <!-- Supabase JS v2 (CDN) -->
+  <!-- Supabase JS v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <!-- Babel for JSX in the browser -->
+  <!-- Babel for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-slate-50">
@@ -20,21 +20,18 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // ====== 1) CONFIG: FILL THESE TWO STRINGS FROM YOUR SUPABASE PROJECT ======
-    const SUPABASE_URL = "https://wphylenqbjyskbpbbuax.supabase.co";            // e.g., https://abcxyz.supabase.co
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndwaHlsZW5xYmp5c2ticGJidWF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczNTQyNDMsImV4cCI6MjA3MjkzMDI0M30.qN68IhysCYgOYG4ZW3fYvAWbSTJihfttnRgrE2DHRyY";  // from Project Settings → API → anon key
-    // ========================================================================
-
+    // ==== Supabase config (use your own values) ====
+    const SUPABASE_URL = "https://wphylenqbjyskbpbbuax.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndwaHlsZW5xYmp5c2ticGJidWF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczNTQyNDMsImV4cCI6MjA3MjkzMDI0M30.qN68IhysCYgOYG4ZW3fYvAWbSTJihfttnRgrE2DHRyY";
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // Helpers
     const uuid = () => (crypto?.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now());
     const getMonthString = (date) => date.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-    const today = new Date();
-    const currentMonth = getMonthString(today);
+    const currentMonth = getMonthString(new Date());
 
     // ---------- Auth UI ----------
-    const AuthPanel = ({ onSignedIn }) => {
+    const AuthPanel = () => {
       const [email, setEmail] = useState("");
       const [password, setPassword] = useState("");
       const [loading, setLoading] = useState(false);
@@ -48,9 +45,8 @@
             if (error) throw error;
             alert('Account created. Now sign in.');
           } else {
-            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            const { error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) throw error;
-            onSignedIn(data.user);
           }
         } catch (e) {
           setError(e.message || 'Error');
@@ -63,7 +59,7 @@
         <div className="min-h-screen flex items-center justify-center p-6">
           <div className="bg-white w-full max-w-md rounded-xl shadow-lg p-6">
             <h1 className="text-2xl font-bold text-slate-800 mb-4 text-center">Sign in to Household Sheet</h1>
-            <p className="text-sm text-slate-600 mb-4 text-center">Use the same account on both devices so you share the same data.</p>
+            <p className="text-sm text-slate-600 mb-4 text-center">Use the same account on both devices.</p>
             <div className="space-y-3">
               <input className="w-full p-3 border border-slate-300 rounded-lg" type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} />
               <input className="w-full p-3 border border-slate-300 rounded-lg" type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} />
@@ -90,7 +86,12 @@
       const [fixedApplied, setFixedApplied] = useState(false);
 
       const [modal, setModal] = useState({ isOpen: false, type: null, title: '', message: '' });
-      const closeModal = () => setModal({ isOpen:false, type:null, title:'', message:'' });
+
+      // Helper: get current user id from session
+      const getUserId = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        return session?.user?.id || null;
+      };
 
       // Auth state
       useEffect(() => {
@@ -103,12 +104,11 @@
         return () => subscription.unsubscribe();
       }, []);
 
-        // After login, fetch the months list
-  useEffect(() => {
-    if (!session) return;
-    loadMonths();
-  }, [session]);
-
+      // After login, fetch months list
+      useEffect(() => {
+        if (!session) return;
+        loadMonths();
+      }, [session]);
 
       // Fetch fixed costs once logged in
       useEffect(() => {
@@ -123,7 +123,7 @@
         fetchFixed();
       }, [session]);
 
-      // Fetch month entries on change
+      // Fetch entries for selected month
       useEffect(() => {
         if (!session) return;
         const fetchMonth = async () => {
@@ -137,7 +137,6 @@
           const cos = (data || []).filter(r => r.type === 'cost');
           setIncome(inc);
           setCosts(cos);
-          // detect if fixed costs already applied for this month
           const { data: flags } = await supabase
             .from('month_flags')
             .select('*')
@@ -148,44 +147,36 @@
         fetchMonth();
       }, [session, selectedMonth]);
 
-      // Derived totals
+      // Totals
       const totalIncome = useMemo(() => income.reduce((a,b)=> a + Number(b.amount||0), 0), [income]);
       const totalCosts  = useMemo(() => costs.reduce((a,b)=> a + Number(b.amount||0), 0), [costs]);
       const netBalance  = useMemo(() => totalIncome - totalCosts, [totalIncome, totalCosts]);
 
-      // CRUD helpers
+      // ---- DB helpers ----
+      const loadMonths = async () => {
+        const monthsSet = new Set([currentMonth]);
+        const { data: m1 } = await supabase.from('entries').select('month').order('month');
+        (m1 || []).forEach(r => monthsSet.add(r.month));
+        const { data: m2 } = await supabase.from('month_flags').select('month').order('month');
+        (m2 || []).forEach(r => monthsSet.add(r.month));
+        setMonths(Array.from(monthsSet));
+      };
+
       const addEntry = async (type, { description, amount }) => {
-  if (!description || !amount) return;
+        if (!description || !amount) return;
+        const user_id = await getUserId();
+        if (!user_id) { alert('Please sign in again'); return; }
 
-  const { data: u } = await supabase.auth.getUser();
-  const user_id = u?.user?.id;
-  if (!user_id) { alert('Please sign in again'); return; }
-
-  const payload = {
-    id: uuid(),
-    user_id,
-    month: selectedMonth,
-    type,
-    description,
-    amount: Number(amount)
-  };
-
-  const { data, error } = await supabase
-    .from('entries')
-    .insert(payload)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Entry insert error:', error);
-    alert('Error adding: ' + (error.message || 'unknown'));
-    return;
-  }
-  if (type === 'income') setIncome(prev => [...prev, data]);
-  else setCosts(prev => [...prev, data]);
-  await loadMonths();
-};
-
+        const payload = { id: uuid(), user_id, month: selectedMonth, type, description, amount: Number(amount) };
+        const { data, error } = await supabase.from('entries').insert(payload).select().single();
+        if (error) {
+          console.error('Entry insert error:', error);
+          alert('Error adding: ' + (error.message || 'unknown'));
+          return;
+        }
+        if (type === 'income') setIncome(prev => [...prev, data]); else setCosts(prev => [...prev, data]);
+        await loadMonths();
+      };
 
       const updateEntry = async (id, fields) => {
         const { data, error } = await supabase.from('entries').update(fields).eq('id', id).select().single();
@@ -202,29 +193,20 @@
       };
 
       const addFixedCost = async ({ description, amount }) => {
-  if (!description || !amount) return;
+        if (!description || !amount) return;
 
-  // get current user id
-  const { data: u } = await supabase.auth.getUser();
-  const user_id = u?.user?.id;
-  if (!user_id) { alert('Please sign in again'); return; }
+        const user_id = await getUserId();
+        if (!user_id) { alert('Please sign in again'); return; }
 
-  const payload = { id: uuid(), user_id, description, amount: Number(amount) };
-
-  const { data, error } = await supabase
-    .from('fixed_costs')
-    .insert(payload)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Fixed cost insert error:', error);
-    alert('Error adding fixed cost: ' + (error.message || 'unknown'));
-    return;
-  }
-  setFixedCosts(prev => [...prev, data]);
-};
-
+        const payload = { id: uuid(), user_id, description, amount: Number(amount) };
+        const { data, error } = await supabase.from('fixed_costs').insert(payload).select().single();
+        if (error) {
+          console.error('Fixed cost insert error:', error);
+          alert('Error adding fixed cost: ' + (error.message || 'unknown'));
+          return;
+        }
+        setFixedCosts(prev => [...prev, data]);
+      };
 
       const deleteFixedCost = async (id) => {
         const { error } = await supabase.from('fixed_costs').delete().eq('id', id);
@@ -233,74 +215,61 @@
       };
 
       const applyFixedCosts = async () => {
-  if (fixedApplied) {
-    setModal({ isOpen:true, type:'alert', title:'Notice', message:'Fixed costs already applied to this month.' });
-    return;
-  }
-  if (fixedCosts.length === 0) return;
+        if (fixedApplied) {
+          setModal({ isOpen:true, type:'alert', title:'Notice', message:'Fixed costs already applied to this month.' });
+          return;
+        }
+        if (fixedCosts.length === 0) return;
 
-  const { data: u } = await supabase.auth.getUser();
-  const user_id = u?.user?.id;
-  if (!user_id) { alert('Please sign in again'); return; }
+        const user_id = await getUserId();
+        if (!user_id) { alert('Please sign in again'); return; }
 
-  const rows = fixedCosts.map(fc => ({
-    id: uuid(),
-    user_id,
-    month: selectedMonth,
-    type: 'cost',
-    description: fc.description,
-    amount: Number(fc.amount)
-  }));
+        const rows = fixedCosts.map(fc => ({
+          id: uuid(),
+          user_id,
+          month: selectedMonth,
+          type: 'cost',
+          description: fc.description,
+          amount: Number(fc.amount)
+        }));
 
-  const { error } = await supabase.from('entries').insert(rows);
-  if (error) {
-    console.error('Apply fixed costs error:', error);
-    alert('Error applying fixed costs: ' + (error.message || 'unknown'));
-    return;
-  }
-  setCosts(prev => [...prev, ...rows]);
-  await supabase.from('month_flags').upsert({ month: selectedMonth, fixed_costs_applied: true });
-  setFixedApplied(true);
-  await loadMonths();
-};
+        const { error } = await supabase.from('entries').insert(rows);
+        if (error) {
+          console.error('Apply fixed costs error:', error);
+          alert('Error applying fixed costs: ' + (error.message || 'unknown'));
+          return;
+        }
+        setCosts(prev => [...prev, ...rows]);
+        await supabase.from('month_flags').upsert({ month: selectedMonth, fixed_costs_applied: true });
+        setFixedApplied(true);
+        await loadMonths();
+      };
 
-
-const loadMonths = async () => {
-  const monthsSet = new Set([currentMonth]);
-
-  const { data: m1 } = await supabase.from('entries').select('month').order('month');
-  (m1 || []).forEach(r => monthsSet.add(r.month));
-
-  const { data: m2 } = await supabase.from('month_flags').select('month').order('month');
-  (m2 || []).forEach(r => monthsSet.add(r.month));
-
-  setMonths(Array.from(monthsSet));
-};
-
-    
       const addMonth = async (name) => {
-  const n = (name || '').trim();
-  if (!n) return;
+        const n = (name || '').trim();
+        if (!n) return;
 
-  // Save the month into the database (month_flags table)
-  const { error } = await supabase
-    .from('month_flags')
-    .upsert({ month: n, fixed_costs_applied: false })
-    .select();
+        const user_id = await getUserId();
+        if (!user_id) { alert('Please sign in again'); return; }
 
-  if (error) {
-    alert('Could not add month');
-    return;
-  }
+        const { error } = await supabase
+          .from('month_flags')
+          .upsert({ month: n, user_id, fixed_costs_applied: false })
+          .select();
 
-  await loadMonths();   // refresh dropdown from DB
-  setSelectedMonth(n);  // switch to that month
-};
+        if (error) {
+          console.error('Add month error:', error);
+          alert('Could not add month: ' + (error.message || 'unknown'));
+          return;
+        }
 
+        await loadMonths();
+        setSelectedMonth(n);
+      };
 
       const signOut = async () => { await supabase.auth.signOut(); };
 
-      if (!session) return <AuthPanel onSignedIn={()=>{}}/>;
+      if (!session) return <AuthPanel />;
 
       return (
         <div className="min-h-screen font-sans text-gray-800 p-4 sm:p-6 lg:p-8">
@@ -352,7 +321,7 @@ const loadMonths = async () => {
       );
     };
 
-    // UI pieces reused
+    // ---------- Reusable UI ----------
     const Modal = ({ type, title, message, onClose, onSubmit }) => {
       const [inputValue, setInputValue] = useState('');
       const handleSubmit = (e) => { e.preventDefault(); if (type==='prompt' && onSubmit) onSubmit(inputValue); onClose(); };
@@ -452,7 +421,7 @@ const loadMonths = async () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="border-b border-slate-200">
+                  <tr className="border-b border-slate-2 00">
                     <th className="p-3 text-slate-600 font-semibold">Description</th>
                     <th className="p-3 text-slate-600 font-semibold text-right w-36">Amount</th>
                     <th className="p-3 text-center w-16"></th>
@@ -508,6 +477,3 @@ const loadMonths = async () => {
   </script>
 </body>
 </html>
-
-
-

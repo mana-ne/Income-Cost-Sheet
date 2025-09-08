@@ -155,12 +155,37 @@
 
       // CRUD helpers
       const addEntry = async (type, { description, amount }) => {
-        if (!description || !amount) return;
-        const payload = { id: uuid(), month: selectedMonth, type, description, amount: Number(amount) };
-        const { data, error } = await supabase.from('entries').insert(payload).select().single();
-        if (error) { alert('Error adding'); return; }
-        if (type === 'income') setIncome(prev => [...prev, data]); else setCosts(prev => [...prev, data]);
-      };
+  if (!description || !amount) return;
+
+  const { data: u } = await supabase.auth.getUser();
+  const user_id = u?.user?.id;
+  if (!user_id) { alert('Please sign in again'); return; }
+
+  const payload = {
+    id: uuid(),
+    user_id,
+    month: selectedMonth,
+    type,
+    description,
+    amount: Number(amount)
+  };
+
+  const { data, error } = await supabase
+    .from('entries')
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Entry insert error:', error);
+    alert('Error adding: ' + (error.message || 'unknown'));
+    return;
+  }
+  if (type === 'income') setIncome(prev => [...prev, data]);
+  else setCosts(prev => [...prev, data]);
+  await loadMonths();
+};
+
 
       const updateEntry = async (id, fields) => {
         const { data, error } = await supabase.from('entries').update(fields).eq('id', id).select().single();
@@ -177,12 +202,29 @@
       };
 
       const addFixedCost = async ({ description, amount }) => {
-        if (!description || !amount) return;
-        const payload = { id: uuid(), description, amount: Number(amount) };
-        const { data, error } = await supabase.from('fixed_costs').insert(payload).select().single();
-        if (error) { alert('Error adding fixed cost'); return; }
-        setFixedCosts(prev => [...prev, data]);
-      };
+  if (!description || !amount) return;
+
+  // get current user id
+  const { data: u } = await supabase.auth.getUser();
+  const user_id = u?.user?.id;
+  if (!user_id) { alert('Please sign in again'); return; }
+
+  const payload = { id: uuid(), user_id, description, amount: Number(amount) };
+
+  const { data, error } = await supabase
+    .from('fixed_costs')
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Fixed cost insert error:', error);
+    alert('Error adding fixed cost: ' + (error.message || 'unknown'));
+    return;
+  }
+  setFixedCosts(prev => [...prev, data]);
+};
+
 
       const deleteFixedCost = async (id) => {
         const { error } = await supabase.from('fixed_costs').delete().eq('id', id);
@@ -191,18 +233,37 @@
       };
 
       const applyFixedCosts = async () => {
-        if (fixedApplied) {
-          setModal({ isOpen:true, type:'alert', title:'Notice', message:'Fixed costs already applied to this month.' });
-          return;
-        }
-        if (fixedCosts.length === 0) return;
-        const rows = fixedCosts.map(fc => ({ id: uuid(), month: selectedMonth, type:'cost', description: fc.description, amount: Number(fc.amount) }));
-        const { error } = await supabase.from('entries').insert(rows);
-        if (error) { alert('Error applying fixed costs'); return; }
-        setCosts(prev => [...prev, ...rows]);
-        await supabase.from('month_flags').upsert({ month: selectedMonth, fixed_costs_applied: true });
-        setFixedApplied(true);
-      };
+  if (fixedApplied) {
+    setModal({ isOpen:true, type:'alert', title:'Notice', message:'Fixed costs already applied to this month.' });
+    return;
+  }
+  if (fixedCosts.length === 0) return;
+
+  const { data: u } = await supabase.auth.getUser();
+  const user_id = u?.user?.id;
+  if (!user_id) { alert('Please sign in again'); return; }
+
+  const rows = fixedCosts.map(fc => ({
+    id: uuid(),
+    user_id,
+    month: selectedMonth,
+    type: 'cost',
+    description: fc.description,
+    amount: Number(fc.amount)
+  }));
+
+  const { error } = await supabase.from('entries').insert(rows);
+  if (error) {
+    console.error('Apply fixed costs error:', error);
+    alert('Error applying fixed costs: ' + (error.message || 'unknown'));
+    return;
+  }
+  setCosts(prev => [...prev, ...rows]);
+  await supabase.from('month_flags').upsert({ month: selectedMonth, fixed_costs_applied: true });
+  setFixedApplied(true);
+  await loadMonths();
+};
+
 
 const loadMonths = async () => {
   const monthsSet = new Set([currentMonth]);
@@ -447,5 +508,6 @@ const loadMonths = async () => {
   </script>
 </body>
 </html>
+
 
 

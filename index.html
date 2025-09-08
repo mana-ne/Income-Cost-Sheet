@@ -25,7 +25,7 @@
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndwaHlsZW5xYmp5c2ticGJidWF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczNTQyNDMsImV4cCI6MjA3MjkzMDI0M30.qN68IhysCYgOYG4ZW3fYvAWbSTJihfttnRgrE2DHRyY";  // from Project Settings → API → anon key
     // ========================================================================
 
-    const supabase = window.Supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // Helpers
     const uuid = () => (crypto?.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now());
@@ -414,3 +414,4 @@
   </script>
 </body>
 </html>
+

@@ -37,47 +37,34 @@
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState("");
 
-     const signUpOrIn = async (mode) => {
-  setLoading(true);
-  setError("");
-  try {
-    if (!email || !password) {
-      setError("Please enter email and password.");
-      return;
-    }
+      const signUpOrIn = async (mode) => {
+        setLoading(true);
+        setError("");
+        try {
+          if (!email || !password) {
+            setError("Please enter email and password.");
+            return;
+          }
 
-    console.log("[Auth] starting", mode, email);
+          if (mode === "signup") {
+            const { error } = await supabase.auth.signUp({ email, password });
+            if (error) throw error;
+            alert("Account created. Now sign in.");
+            return;
+          }
 
-    if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) throw error;
-      alert("Account created. Now sign in.");
-      return;
-    }
+          // SIGN IN
+          const { error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
 
-    // SIGN IN
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) throw error;
-
-    console.log("[Auth] sign-in response:", data);
-
-    // Verify we actually have a session and then reload the app state
-    const { data: s } = await supabase.auth.getSession();
-    if (s?.session) {
-      console.log("[Auth] session present, reloading...");
-      setError("Signed in but no session detected. Check Supabase Auth URL configuration.");
-    }
-  } catch (e) {
-    console.error("[Auth] error:", e);
-    setError(e?.message || "Failed to sign in.");
-  } finally {
-    setLoading(false);
-  }
-};
-
+          // onAuthStateChange listener in App will switch the UI
+        } catch (e) {
+          console.error("[Auth] error:", e);
+          setError(e?.message || "Failed to sign in.");
+        } finally {
+          setLoading(false);
+        }
+      };
 
       return (
         <div className="min-h-screen flex items-center justify-center p-6">
@@ -101,13 +88,13 @@
     // ---------- Main App ----------
     const App = () => {
       const [session, setSession] = useState(null);
+
       const [months, setMonths] = useState([currentMonth]);
       const [selectedMonth, setSelectedMonth] = useState(currentMonth);
 
       const [income, setIncome] = useState([]);
       const [costs, setCosts] = useState([]);
       const [fixedCosts, setFixedCosts] = useState([]);
-      const [fixedApplied, setFixedApplied] = useState(false); // kept for now, not used for disabling
 
       const [modal, setModal] = useState({ isOpen: false, type: null, title: '', message: '' });
 
@@ -115,77 +102,61 @@
         const { data: { session } } = await supabase.auth.getSession();
         return session?.user?.id || null;
       };
-      // ---------- Main App ----------
-const App = () => {
-  const [session, setSession] = useState(null);
-  // ... your other state
 
-  // ✅ AUTH LISTENER (required)
-  useEffect(() => {
-    // get the current session on first load
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session || null);
-    })();
+      // ✅ Auth listener (initial + future changes)
+      useEffect(() => {
+        (async () => {
+          const { data: { session } } = await supabase.auth.getSession();
+          setSession(session || null);
+        })();
 
-    // subscribe to future auth changes (sign in / sign out / token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess || null);
-    });
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
+          setSession(sess || null);
+        });
+        return () => subscription.unsubscribe();
+      }, []);
 
-    return () => subscription.unsubscribe();
-  }, []);
-
-      // Auth state
-// Replace your "After login" effect with this:
-useEffect(() => {
-  if (!session) return;
-  (async () => {
-    const list = await loadMonths();
-
-    // If the currently selected month isn't in the list, pick the newest that exists
-    if (list.length && !list.includes(selectedMonth)) {
-      setSelectedMonth(list[list.length - 1]); // newest available
-    }
-  })();
-}, [session]);
-
-
-      // After login, fetch months list
-      useEffect(() => { if (session) loadMonths(); }, [session]);
-
-      // Fetch fixed costs once logged in
+      // After login: load months and ensure selectedMonth exists
       useEffect(() => {
         if (!session) return;
         (async () => {
-          const { data } = await supabase
+          const list = await loadMonths();
+          if (list.length && !list.includes(selectedMonth)) {
+            setSelectedMonth(list[list.length - 1]);
+          }
+        })();
+      }, [session]);
+
+      // Load fixed costs after login
+      useEffect(() => {
+        if (!session) return;
+        (async () => {
+          const { data, error } = await supabase
             .from('fixed_costs')
             .select('*')
             .order('created_at', { ascending: true });
+          if (error) console.error(error);
           setFixedCosts(data || []);
         })();
       }, [session]);
 
-      // Fetch entries for selected month
+      // Load entries whenever month changes
       useEffect(() => {
         if (!session) return;
         (async () => {
-          const { data } = await supabase
+          const { data, error } = await supabase
             .from('entries')
             .select('*')
             .eq('month', selectedMonth)
             .order('created_at', { ascending: true });
+          if (error) {
+            console.error(error);
+            return;
+          }
           const inc = (data || []).filter(r => r.type === 'income');
           const cos = (data || []).filter(r => r.type === 'cost');
           setIncome(inc);
           setCosts(cos);
-
-          const { data: flags } = await supabase
-            .from('month_flags')
-            .select('*')
-            .eq('month', selectedMonth)
-            .maybeSingle();
-          setFixedApplied(!!flags?.fixed_costs_applied);
         })();
       }, [session, selectedMonth]);
 
@@ -194,59 +165,78 @@ useEffect(() => {
       const totalCosts  = useMemo(() => costs.reduce((a,b)=> a + Number(b.amount||0), 0), [costs]);
       const netBalance  = useMemo(() => totalIncome - totalCosts, [totalIncome, totalCosts]);
 
-// Replace your existing loadMonths with this:
-const loadMonths = async () => {
-  try {
-    const monthsSet = new Set();
+      // Load months list from entries + month_flags; always include current month label
+      const loadMonths = async () => {
+        try {
+          const monthsSet = new Set();
 
-    // entries months
-    const { data: m1, error: e1 } = await supabase
-      .from('entries')
-      .select('month')
-      .order('created_at', { ascending: true });
+          const { data: m1, error: e1 } = await supabase
+            .from('entries')
+            .select('month')
+            .order('created_at', { ascending: true });
+          if (!e1) (m1 || []).forEach(r => r?.month && monthsSet.add(r.month));
 
-    if (e1) {
-      console.error('loadMonths entries error:', e1);
-    } else {
-      (m1 || []).forEach(r => r?.month && monthsSet.add(r.month));
-    }
+          const { data: m2, error: e2 } = await supabase
+            .from('month_flags')
+            .select('month, created_at')
+            .order('created_at', { ascending: true });
+          if (!e2) (m2 || []).forEach(r => r?.month && monthsSet.add(r.month));
 
-    // month_flags months
-    const { data: m2, error: e2 } = await supabase
-      .from('month_flags')
-      .select('month, created_at')
-      .order('created_at', { ascending: true });
+          monthsSet.add(getMonthString(new Date()));
 
-    if (e2) {
-      console.error('loadMonths month_flags error:', e2);
-    } else {
-      (m2 || []).forEach(r => r?.month && monthsSet.add(r.month));
-    }
+          const list = Array.from(monthsSet);
+          list.sort((a, b) => new Date(`${a} 1`) - new Date(`${b} 1`));
+          setMonths(list);
+          return list;
+        } catch (err) {
+          console.error('loadMonths fatal:', err);
+          return [];
+        }
+      };
 
-    // Always include the current month label so the dropdown has it
-    const currentLabel = getMonthString(new Date());
-    monthsSet.add(currentLabel);
+      // CRUD
+      const addEntry = async (type, { description, amount }) => {
+        if (!description || !amount) return;
 
-    const list = Array.from(monthsSet);
-    list.sort((a, b) => {
-      // sort by date so newest is last
-      const da = new Date(`${a} 1`);
-      const db = new Date(`${b} 1`);
-      return da - db;
-    });
+        const user_id = await getUserId();
+        if (!user_id) { alert('Please sign in again'); return; }
 
-    setMonths(list);
-    return list;
-  } catch (err) {
-    console.error('loadMonths fatal:', err);
-    return [];
-  }
-};
+        const payload = {
+          id: uuid(),
+          user_id,
+          month: selectedMonth,
+          type,
+          description,
+          amount: Number(amount),
+          is_fixed: false
+        };
 
+        const { data, error } = await supabase
+          .from('entries')
+          .insert(payload)
+          .select()
+          .single();
+
+        if (error) {
+          alert('Error adding: ' + (error.message || 'unknown'));
+          return;
+        }
+
+        if (type === 'income') setIncome(prev => [...prev, data]);
+        else setCosts(prev => [...prev, data]);
+
+        await loadMonths();
+      };
 
       const updateEntry = async (id, fields) => {
-        const { data, error } = await supabase.from('entries').update(fields).eq('id', id).select().single();
+        const { data, error } = await supabase
+          .from('entries')
+          .update(fields)
+          .eq('id', id)
+          .select()
+          .single();
         if (error) return;
+
         setIncome(prev => prev.map(i => i.id===id ? { ...i, ...data } : i));
         setCosts(prev => prev.map(c => c.id===id ? { ...c, ...data } : c));
       };
@@ -262,10 +252,15 @@ const loadMonths = async () => {
         if (!description || !amount) return;
         const user_id = await getUserId();
         if (!user_id) { alert('Please sign in again'); return; }
+
         const payload = { id: uuid(), user_id, description, amount: Number(amount) };
-        const { data, error } = await supabase.from('fixed_costs').insert(payload).select().single();
+        const { data, error } = await supabase
+          .from('fixed_costs')
+          .insert(payload)
+          .select()
+          .single();
+
         if (error) {
-          console.error('Fixed cost insert error:', error);
           alert('Error adding fixed cost: ' + (error.message || 'unknown'));
           return;
         }
@@ -280,29 +275,22 @@ const loadMonths = async () => {
 
       // Always enabled: refreshes fixed costs for the selected month
       const applyFixedCosts = async () => {
-        if (fixedCosts.length === 0) {
-          alert('No fixed costs defined yet');
-          return;
-        }
+        if (fixedCosts.length === 0) { alert('No fixed costs defined yet'); return; }
 
         const { data: u } = await supabase.auth.getUser();
         const user_id = u?.user?.id;
         if (!user_id) { alert('Please sign in again'); return; }
 
-        // 1) Remove previously-applied fixed costs for this month
+        // Remove previously-applied fixed rows for this month for this user
         const { error: delErr } = await supabase
           .from('entries')
           .delete()
           .eq('user_id', user_id)
           .eq('month', selectedMonth)
           .eq('is_fixed', true);
-        if (delErr) {
-          console.error('Delete old fixed rows error:', delErr);
-          alert('Could not refresh fixed costs');
-          return;
-        }
+        if (delErr) { alert('Could not refresh fixed costs'); return; }
 
-        // 2) Insert fresh snapshot from fixed_costs
+        // Insert new snapshot
         const rows = fixedCosts.map(fc => ({
           id: uuid(),
           user_id,
@@ -315,14 +303,10 @@ const loadMonths = async () => {
 
         if (rows.length) {
           const { error: insErr } = await supabase.from('entries').insert(rows);
-          if (insErr) {
-            console.error('Insert fixed rows error:', insErr);
-            alert('Could not apply fixed costs');
-            return;
-          }
+          if (insErr) { alert('Could not apply fixed costs'); return; }
         }
 
-        // 3) Update UI list for this month
+        // Update UI
         setCosts(prev => {
           const keep = prev.filter(c => !c.is_fixed);
           return [...keep, ...rows];
@@ -334,15 +318,17 @@ const loadMonths = async () => {
         if (!n) return;
         const user_id = await getUserId();
         if (!user_id) { alert('Please sign in again'); return; }
+
         const { error } = await supabase
           .from('month_flags')
           .upsert({ month: n, user_id, fixed_costs_applied: false })
           .select();
+
         if (error) {
-          console.error('Add month error:', error);
           alert('Could not add month: ' + (error.message || 'unknown'));
           return;
         }
+
         await loadMonths();
         setSelectedMonth(n);
       };
@@ -383,7 +369,7 @@ const loadMonths = async () => {
               onAdd={addFixedCost}
               onDelete={deleteFixedCost}
               onApply={applyFixedCosts}
-              canApply={true}  /* always enabled */
+              canApply={true}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
@@ -560,6 +546,3 @@ const loadMonths = async () => {
   </script>
 </body>
 </html>
-
-
-

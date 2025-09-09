@@ -37,23 +37,49 @@
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState("");
 
-      const signUpOrIn = async (mode) => {
-        try {
-          setLoading(true); setError("");
-          if (mode === 'signup') {
-            const { error } = await supabase.auth.signUp({ email, password });
-            if (error) throw error;
-            alert('Account created. Now sign in.');
-          } else {
-            const { error } = await supabase.auth.signInWithPassword({ email, password });
-            if (error) throw error;
-          }
-        } catch (e) {
-          setError(e.message || 'Error');
-        } finally {
-          setLoading(false);
-        }
-      };
+     const signUpOrIn = async (mode) => {
+  setLoading(true);
+  setError("");
+  try {
+    if (!email || !password) {
+      setError("Please enter email and password.");
+      return;
+    }
+
+    console.log("[Auth] starting", mode, email);
+
+    if (mode === "signup") {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+      alert("Account created. Now sign in.");
+      return;
+    }
+
+    // SIGN IN
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
+
+    console.log("[Auth] sign-in response:", data);
+
+    // Verify we actually have a session and then reload the app state
+    const { data: s } = await supabase.auth.getSession();
+    if (s?.session) {
+      console.log("[Auth] session present, reloading...");
+      window.location.reload(); // simplest way to ensure effects run
+    } else {
+      setError("Signed in but no session detected. Check Supabase Auth URL configuration.");
+    }
+  } catch (e) {
+    console.error("[Auth] error:", e);
+    setError(e?.message || "Failed to sign in.");
+  } finally {
+    setLoading(false);
+  }
+};
+
 
       return (
         <div className="min-h-screen flex items-center justify-center p-6">
@@ -516,4 +542,5 @@ const loadMonths = async () => {
   </script>
 </body>
 </html>
+
 

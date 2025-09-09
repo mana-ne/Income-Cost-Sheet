@@ -93,14 +93,19 @@
       };
 
       // Auth state
-      useEffect(() => {
-        (async () => {
-          const { data: { session } } = await supabase.auth.getSession();
-          setSession(session);
-        })();
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
-        return () => subscription.unsubscribe();
-      }, []);
+// Replace your "After login" effect with this:
+useEffect(() => {
+  if (!session) return;
+  (async () => {
+    const list = await loadMonths();
+
+    // If the currently selected month isn't in the list, pick the newest that exists
+    if (list.length && !list.includes(selectedMonth)) {
+      setSelectedMonth(list[list.length - 1]); // newest available
+    }
+  })();
+}, [session]);
+
 
       // After login, fetch months list
       useEffect(() => { if (session) loadMonths(); }, [session]);
@@ -145,41 +150,55 @@
       const totalCosts  = useMemo(() => costs.reduce((a,b)=> a + Number(b.amount||0), 0), [costs]);
       const netBalance  = useMemo(() => totalIncome - totalCosts, [totalIncome, totalCosts]);
 
-      // ---- DB helpers ----
-      const loadMonths = async () => {
-        const monthsSet = new Set([currentMonth]);
-        const { data: m1 } = await supabase.from('entries').select('month').order('month');
-        (m1 || []).forEach(r => monthsSet.add(r.month));
-        const { data: m2 } = await supabase.from('month_flags').select('month').order('month');
-        (m2 || []).forEach(r => monthsSet.add(r.month));
-        setMonths(Array.from(monthsSet));
-      };
+// Replace your existing loadMonths with this:
+const loadMonths = async () => {
+  try {
+    const monthsSet = new Set();
 
-      const addEntry = async (type, { description, amount }) => {
-        if (!description || !amount) return;
+    // entries months
+    const { data: m1, error: e1 } = await supabase
+      .from('entries')
+      .select('month')
+      .order('created_at', { ascending: true });
 
-        const { data: u } = await supabase.auth.getUser();
-        const user_id = u?.user?.id;
-        if (!user_id) { alert('Please sign in again'); return; }
+    if (e1) {
+      console.error('loadMonths entries error:', e1);
+    } else {
+      (m1 || []).forEach(r => r?.month && monthsSet.add(r.month));
+    }
 
-        const payload = {
-          id: uuid(),
-          user_id,
-          month: selectedMonth,
-          type,
-          description,
-          amount: Number(amount),
-          is_fixed: false
-        };
+    // month_flags months
+    const { data: m2, error: e2 } = await supabase
+      .from('month_flags')
+      .select('month, created_at')
+      .order('created_at', { ascending: true });
 
-        const { data, error } = await supabase.from('entries').insert(payload).select().single();
-        if (error) { alert('Error adding: ' + (error.message || 'unknown')); return; }
+    if (e2) {
+      console.error('loadMonths month_flags error:', e2);
+    } else {
+      (m2 || []).forEach(r => r?.month && monthsSet.add(r.month));
+    }
 
-        if (type === 'income') setIncome(prev => [...prev, data]);
-        else setCosts(prev => [...prev, data]);
+    // Always include the current month label so the dropdown has it
+    const currentLabel = getMonthString(new Date());
+    monthsSet.add(currentLabel);
 
-        await loadMonths();
-      };
+    const list = Array.from(monthsSet);
+    list.sort((a, b) => {
+      // sort by date so newest is last
+      const da = new Date(`${a} 1`);
+      const db = new Date(`${b} 1`);
+      return da - db;
+    });
+
+    setMonths(list);
+    return list;
+  } catch (err) {
+    console.error('loadMonths fatal:', err);
+    return [];
+  }
+};
+
 
       const updateEntry = async (id, fields) => {
         const { data, error } = await supabase.from('entries').update(fields).eq('id', id).select().single();
@@ -497,3 +516,4 @@
   </script>
 </body>
 </html>
+
